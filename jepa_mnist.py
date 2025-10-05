@@ -6,20 +6,24 @@ from torch.utils.data import DataLoader
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
+import seaborn as sns
 
 # --- Setup ---
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Hyperparams
+# z_dim = 64
 z_dim = 64
 lr = 1e-3
 # batch_size = 128
-batch_size = 4096
+batch_size = 256
 # n_epochs = 20
-n_epochs = 120
-# ema_decay = 0.99
-ema_decay = 0.9
+n_epochs = 100
+ema_decay = 0.99
+# ema_decay = 0.9
 # mask_size = (14, 14)  # mask a 14x14 square in 28x28 MNIST
 mask_size = (10, 10)
 img_size = 28
@@ -44,10 +48,10 @@ class MLPEncoder(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
+            # nn.Linear(hidden_dim, hidden_dim),
+            # nn.ReLU(),
+            # nn.Linear(hidden_dim, hidden_dim),
+            # nn.ReLU(),
             nn.Linear(hidden_dim, z_dim)
         )
 
@@ -62,10 +66,10 @@ class Predictor(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
+            # nn.Linear(hidden_dim, hidden_dim),
+            # nn.ReLU(),
+            # nn.Linear(hidden_dim, hidden_dim),
+            # nn.ReLU(),
             nn.Linear(hidden_dim, z_dim)
         )
 
@@ -80,10 +84,10 @@ class SimpleDecoder(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
+            # nn.Linear(hidden_dim, hidden_dim),
+            # nn.ReLU(),
+            # nn.Linear(hidden_dim, hidden_dim),
+            # nn.ReLU(),
             nn.Linear(hidden_dim, out_dim),
             nn.Sigmoid()  # for pixel values [0,1]
         )
@@ -126,12 +130,70 @@ def random_occlusion_mask(batch_tensor, mask_size, fill_value=0.0):
 
 # --- Training Loop ---
 
-for epoch in range(n_epochs):
+# for epoch in range(n_epochs):
+#     encoder_online.train()
+#     predictor.train()
+#     decoder.train()
+#
+#     total_loss = 0.0
+#     for images, _ in train_loader:
+#         images = images.to(device)  # (B, 1, 28, 28)
+#         B = images.size(0)
+#         flat = images.view(B, -1)
+#
+#         # Create occluded context
+#         occluded = random_occlusion_mask(images, mask_size, fill_value=0.0)
+#         flat_occ = occluded.view(B, -1)
+#
+#         # Embeddings
+#         z_context = encoder_online(flat_occ)  # embedding of occluded input
+#         # Target embedding from full image via target encoder
+#         with torch.no_grad():
+#             z_target = encoder_target(flat)  # (B, z_dim)
+#
+#         # Prediction
+#         z_pred = predictor(z_context)
+#
+#         # Loss: embedding alignment
+#         loss_embed = nn.functional.mse_loss(z_pred, z_target)
+#
+#         # Optionally, reconstruction: reconstruct full image from predicted embedding
+#         # We can reconstruct the masked part or full; here full
+#         recon = decoder(z_pred)  # (B, img_size*img_size)
+#         loss_recon = nn.functional.mse_loss(recon, flat)
+#
+#         # Total loss = embed + recon (with weight)
+#         loss = loss_embed + 0.1 * loss_recon
+#
+#         optimizer.zero_grad()
+#         loss.backward()
+#         optimizer.step()
+#
+#         update_ema(encoder_online, encoder_target, beta=ema_decay)
+#
+#         total_loss += loss.item() * B
+#
+#     avg_loss = total_loss / len(train)
+#     print(f"Epoch {epoch}/{n_epochs} — Loss: {avg_loss:.6f}, Loss recon: {loss_recon:.6f}, Loss embed: {loss_embed:.6f}")
+
+# --- Updated Training Loop: 20 epochs embed-only + 10 with reconstruction ---
+
+# Updated hyperparams for stability
+n_epochs_embed_only = 60
+n_epochs_recon = 40
+total_epochs = n_epochs_embed_only + n_epochs_recon
+
+print_interval = 1  # print every N epochs
+
+for epoch in range(total_epochs):
     encoder_online.train()
     predictor.train()
     decoder.train()
 
     total_loss = 0.0
+    total_embed_loss = 0.0
+    total_recon_loss = 0.0
+
     for images, _ in train_loader:
         images = images.to(device)  # (B, 1, 28, 28)
         B = images.size(0)
@@ -142,24 +204,25 @@ for epoch in range(n_epochs):
         flat_occ = occluded.view(B, -1)
 
         # Embeddings
-        z_context = encoder_online(flat_occ)  # embedding of occluded input
-        # Target embedding from full image via target encoder
+        z_context = encoder_online(flat_occ)
         with torch.no_grad():
-            z_target = encoder_target(flat)  # (B, z_dim)
+            z_target = encoder_target(flat)
 
         # Prediction
         z_pred = predictor(z_context)
 
-        # Loss: embedding alignment
+        # Embedding loss
         loss_embed = nn.functional.mse_loss(z_pred, z_target)
 
-        # Optionally, reconstruction: reconstruct full image from predicted embedding
-        # We can reconstruct the masked part or full; here full
-        recon = decoder(z_pred)  # (B, img_size*img_size)
-        loss_recon = nn.functional.mse_loss(recon, flat)
+        # Optional: reconstruction from predicted embedding
+        if epoch >= n_epochs_embed_only:
+            recon = decoder(z_pred)
+            loss_recon = nn.functional.mse_loss(recon, flat)
+        else:
+            loss_recon = torch.tensor(0.0, device=device)
 
-        # Total loss = embed + recon (with weight)
-        loss = loss_embed + 0.1 * loss_recon
+        # Total loss
+        loss = loss_embed + (0.1 * loss_recon if epoch >= n_epochs_embed_only else 0.0)
 
         optimizer.zero_grad()
         loss.backward()
@@ -168,9 +231,19 @@ for epoch in range(n_epochs):
         update_ema(encoder_online, encoder_target, beta=ema_decay)
 
         total_loss += loss.item() * B
+        total_embed_loss += loss_embed.item() * B
+        total_recon_loss += loss_recon.item() * B
 
     avg_loss = total_loss / len(train)
-    print(f"Epoch {epoch}/{n_epochs} — Loss: {avg_loss:.6f}")
+    avg_embed_loss = total_embed_loss / len(train)
+    avg_recon_loss = total_recon_loss / len(train)
+
+    if (epoch + 1) % print_interval == 0:
+        print(f"[Epoch {epoch+1}/{total_epochs}] "
+              f"Total Loss: {avg_loss:.6f} | "
+              f"Embed: {avg_embed_loss:.6f} | "
+              f"Recon: {avg_recon_loss:.6f}")
+
 
 # --- After Training: Embedding Visualization ---
 
@@ -221,5 +294,54 @@ for i in range(n_show):
     axs[i, 2].set_title("Reconstructed")
     for j in range(3):
         axs[i, j].axis('off')
+plt.tight_layout()
+plt.show()
+
+
+# --- Extract embeddings from train and test sets ---
+def get_embeddings_and_labels(encoder, dataloader):
+    encoder.eval()
+    all_z = []
+    all_labels = []
+    with torch.no_grad():
+        for images, labels in dataloader:
+            images = images.to(device)
+            flat = images.view(images.size(0), -1)
+            z = encoder(flat)
+            all_z.append(z.cpu().numpy())
+            all_labels.append(labels.cpu().numpy())
+    return np.concatenate(all_z), np.concatenate(all_labels)
+
+# Get embeddings
+print("\nExtracting embeddings for k-NN evaluation...")
+
+z_train, y_train = get_embeddings_and_labels(encoder_online, train_loader)
+z_test, y_test = get_embeddings_and_labels(encoder_online, test_loader)
+
+# --- Fit k-NN classifier ---
+k = 5
+knn = KNeighborsClassifier(n_neighbors=k, n_jobs=-1)
+knn.fit(z_train, y_train)
+
+# Predict on test set
+y_pred = knn.predict(z_test)
+
+# --- Evaluation Metrics ---
+acc = accuracy_score(y_test, y_pred)
+precision, recall, f1, _ = precision_recall_fscore_support(y_test, y_pred, average='weighted')
+
+print(f"\n🔍 k-NN Evaluation (k={k}):")
+print(f"Accuracy:  {acc:.4f}")
+print(f"Precision: {precision:.4f}")
+print(f"Recall:    {recall:.4f}")
+print(f"F1 Score:  {f1:.4f}")
+
+# --- Confusion Matrix ---
+cm = confusion_matrix(y_test, y_pred)
+plt.figure(figsize=(8, 6))
+sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=range(10), yticklabels=range(10))
+plt.xlabel("Predicted")
+plt.ylabel("True Label")
+plt.title(f"Confusion Matrix — k-NN Classifier (k={k})")
 plt.tight_layout()
 plt.show()
