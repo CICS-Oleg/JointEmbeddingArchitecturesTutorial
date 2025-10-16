@@ -140,43 +140,6 @@ class JEPA(nn.Module):
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-def vicreg_loss(z1, z2, sim_weight=25.0, var_weight=25.0, cov_weight=1.0, eps=1e-4):
-    """
-    Compute VICReg loss between two batches of embeddings z1, z2.
-
-    z1, z2 : tensors of shape (B, D)
-        Two sets of embeddings (e.g., online/predictor and target).
-    sim_weight, var_weight, cov_weight : float
-        Weights for invariance, variance, and covariance terms.
-    eps : float
-        Small constant for numerical stability.
-
-    Returns total VICReg loss and individual components.
-    """
-
-    # -------- 1. Invariance term (MSE between paired embeddings) --------
-    sim_loss = F.mse_loss(z1, z2)
-
-    # -------- 2. Variance term (encourages per-dimension std > 1) ------
-    std_z1 = torch.sqrt(z1.var(dim=0) + eps)
-    std_z2 = torch.sqrt(z2.var(dim=0) + eps)
-    var_loss = torch.mean(F.relu(1 - std_z1)) + torch.mean(F.relu(1 - std_z2))
-
-    # -------- 3. Covariance term (decorrelate embedding dimensions) ----
-    B, D = z1.size()
-    z1 = z1 - z1.mean(dim=0)
-    z2 = z2 - z2.mean(dim=0)
-
-    cov_z1 = (z1.T @ z1) / (B - 1)
-    cov_z2 = (z2.T @ z2) / (B - 1)
-
-    off_diag_mask = ~torch.eye(D, device=z1.device, dtype=bool)
-    cov_loss = (cov_z1[off_diag_mask].pow(2).sum() / D) + (cov_z2[off_diag_mask].pow(2).sum() / D)
-
-    # -------- Combine weighted terms --------
-    loss = sim_weight * sim_loss + var_weight * var_loss + cov_weight * cov_loss
-    return loss
-
 # ---------------- TRAINING PARAMS ----------------
 latent_dim = 128
 lr = 1e-3
