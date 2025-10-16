@@ -16,17 +16,17 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 warnings.filterwarnings("ignore")
 
 # ---------------- DATA PERTURBATION ----------------
-def prepare_transforms(device, batch_size):
+def prepare_transforms(device, batch_size, coeff=1.0):
     H = W =        28
-    rotation_deg = 15
-    shear_deg =    15
-    translate =   (0.2,   0.2)
-    scale_range = (0.666, 1.1)
+    rotation_deg = coeff * 30
+    shear_deg =    coeff * 15
+    translate =   (coeff * 0.15, coeff * 0.15)
+    scale_range = (1.0 - coeff * 0.25, 1.0 + coeff * 0.1)
     
     angles = torch.empty(batch_size, device=device).uniform_(-rotation_deg, rotation_deg) * (3.14159 / 180)
     tx = torch.empty(batch_size, device=device).uniform_(-translate[0], translate[0]) * W
     ty = torch.empty(batch_size, device=device).uniform_(-translate[1], translate[1]) * H
-    s = torch.empty(batch_size, device=device).uniform_(scale_range[0], scale_range[1])
+    s = torch.empty(batch_size, device=device).uniform_(1/scale_range[1], 1/scale_range[0])
     sh = torch.empty(batch_size, device=device).uniform_(-shear_deg, shear_deg) * (3.14159 / 180)
     theta = torch.zeros(batch_size, 2, 3, device=device)
     theta[:, 0, 0] = s * torch.cos(angles)
@@ -38,7 +38,7 @@ def prepare_transforms(device, batch_size):
     grid = F.affine_grid(theta, (batch_size, 1, 28, 28), align_corners=True)
     return grid
     
-def morph_perturb_image(img):
+def morph_perturb_image(img, coeff=1.0):
     B, C, H, W = img.shape
     device = img.device
 
@@ -47,12 +47,12 @@ def morph_perturb_image(img):
     perturbed = torch.empty_like(img)
 
     # ---- Affine transform ----
-    tforms = prepare_transforms(device, B)
-    perturbed = F.grid_sample(img, tforms, padding_mode="reflection", align_corners=True)
+    tforms = prepare_transforms(device, B, coeff)
+    perturbed = F.grid_sample(img, tforms, padding_mode="zeros", align_corners=True)
     # ---- Randomly choose none/erosion/dilation ----
-    choice = torch.randint(0, 2, (B,), device=device)
+    choice = torch.randint(0, 3, (B,), device=device)
     # ---- Randomly choose inversion ----
-    choice2 = torch.randint(0, 1, (B,), device=device) == 1
+    choice2 = torch.randint(0, 2, (B,), device=device) == 1
     for i in range(B):
         if choice[i] == 1:  # erosion            
             #-F.max_pool2d(-x, 2, stride=1, padding=1)
@@ -78,12 +78,13 @@ class Encoder(nn.Module):
     def __init__(self, latent_dim=128):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Conv2d(1, 32, 3, stride=2, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(32, 64, 3, stride=2, padding=1),
-            nn.SiLU(),
+            nn.Conv2d(1, 64, 3, stride=2, padding=1), nn.BatchNorm2d(64), nn.SiLU(),
+            nn.Conv2d(64, 128, 3, stride=2, padding=1), nn.BatchNorm2d(128), nn.SiLU(),
+            nn.Conv2d(128, 256, 3, stride=2, padding=1), nn.BatchNorm2d(256), nn.SiLU(),
+            nn.AdaptiveAvgPool2d((1,1)),   # global pooling
             nn.Flatten(),
-            nn.Linear(64 * 7 * 7, latent_dim),
+            nn.Linear(256, latent_dim),
+            nn.LayerNorm(latent_dim)
         )
         self.ln = nn.LayerNorm(latent_dim, eps=1e-6)
 
@@ -145,11 +146,9 @@ latent_dim = 128
 lr = 1e-3
 tau = 0.999
 model = JEPA(latent_dim=latent_dim).to(device)
-epochs_phase1 = 25  #f~98.4% knn
-#epochs_phase1 = 60 #for ~98.5% knn
-#epochs_phase1 = 300 #for ~98.8% knn
+epochs_phase1 = 25
 epochs_phase2 = 15
-batch_size = 128
+batch_size = 32
 
 # ---------------- DATA ----------------
 transform = transforms.Compose([transforms.ToTensor()])
@@ -171,7 +170,8 @@ for epoch in range(epochs_phase1):
         if img.shape[0] != batch_size:
             continue
         img = img.to(device)
-        perturbed_img = morph_perturb_image(img).to(device)
+        coeff = epoch / epochs_phase1
+        perturbed_img = morph_perturb_image(img, coeff).to(device)
 
         z_pred, z_target = model(img, perturbed_img)
         z_target = z_target.detach()
