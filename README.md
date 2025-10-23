@@ -123,20 +123,20 @@ We've explored several self-supervised and generative learning approaches, each 
 
 ---
 
-## Experiments on the MNIST dataset
+# 🔬 Experiments on the MNIST dataset
 
-### 1. **Data Perturbation**  
+## 1. **Data Perturbation**  
    - **Goal**: Apply various transformations (affine, erosion, dilation, inversion, and noise) to perturb MNIST images.  
    - **Method**: Uses random transformations like rotations, scaling, shearing, and random noise to alter the images.
 
-### 2. **Phase 1: JEPA Embedding Training**  
+## 2. **Phase 1: JEPA Embedding Training**  
    - **Goal**: Train a model to generate robust latent representations (embeddings) using perturbation-based self-supervised learning.  
    - **Method**: The model learns to predict representations of perturbed images using cosine similarity loss.  
    - **Evaluation**: Embeddings visualized using PCA and evaluated with k-NN accuracy.
 
 ![jepa_img](imgs/500.gif)
 
-#### k-NN Evaluation (k=5):
+### k-NN Evaluation (k=5):
 
 - **Accuracy**:  0.9901
 - **Precision**: 0.9901
@@ -145,7 +145,7 @@ We've explored several self-supervised and generative learning approaches, each 
 
 ![knn](imgs/knn_score.png)
 
-### 3. **Phase 2: Reconstruction Fine-Tuning**  
+## 3. **Phase 2: Reconstruction Fine-Tuning**  
    - **Goal**: Fine-tune the model for image reconstruction using a decoder.  
    - **Method**: The model, after training embeddings, reconstructs perturbed images and optimizes using MSE loss.  
    - **Evaluation**: Visual comparison of original, perturbed, and reconstructed images.
