@@ -88,7 +88,7 @@ We've explored several self-supervised and generative learning approaches, each 
 - Alternated mask per epoch.
 - [Paper](https://arxiv.org/pdf/2301.08243)
 
-![jepa_img](imgs/jepa_energy_animation_masked_coords.gif)
+![jepa_img](imgs/jepa_energy_animation_mixed_loss_pred.gif.gif)
 
 ### d. EMA-Based JEPA (BYOL-style)
 - Online encoder: `f(x)` (trainable).
@@ -122,3 +122,32 @@ We've explored several self-supervised and generative learning approaches, each 
 | JEPA + EMA       | ❌ No             | ❌ No         | ❌        | ✅ Stable + non-local      | Optional             |
 
 ---
+
+## Experiments on the MNIST dataset
+
+### 1. **Data Perturbation**  
+   - **Goal**: Apply various transformations (affine, erosion, dilation, inversion, and noise) to perturb MNIST images.  
+   - **Method**: Uses random transformations like rotations, scaling, shearing, and random noise to alter the images.
+
+### 2. **Phase 1: JEPA Embedding Training**  
+   - **Goal**: Train a model to generate robust latent representations (embeddings) using perturbation-based self-supervised learning.  
+   - **Method**: The model learns to predict representations of perturbed images using cosine similarity loss.  
+   - **Evaluation**: Embeddings visualized using PCA and evaluated with k-NN accuracy.
+
+![jepa_img](imgs/500.gif)
+
+#### k-NN Evaluation (k=5):
+
+- **Accuracy**:  0.9901
+- **Precision**: 0.9901
+- **Recall**:    0.9901
+- **F1 Score**:  0.9901
+
+![knn](imgs/knn_score.png)
+
+### 3. **Phase 2: Reconstruction Fine-Tuning**  
+   - **Goal**: Fine-tune the model for image reconstruction using a decoder.  
+   - **Method**: The model, after training embeddings, reconstructs perturbed images and optimizes using MSE loss.  
+   - **Evaluation**: Visual comparison of original, perturbed, and reconstructed images.
+
+![jepa_img](imgs/Reconstruction.png)

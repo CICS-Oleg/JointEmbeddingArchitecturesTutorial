@@ -37,8 +37,30 @@ def prepare_transforms(device, batch_size, coeff=1.0):
     theta[:, 1, 2] = ty / (H - 1)
     grid = F.affine_grid(theta, (batch_size, 1, 28, 28), align_corners=True)
     return grid
-    
-def morph_perturb_image(img, coeff=1.0):
+
+
+# ---- Add Salt and Pepper Noise ----
+def salt_and_pepper(img, noise_prob=0.05):
+    """ Add salt and pepper noise to an image tensor. """
+    B, C, H, W = img.shape
+    device = img.device
+
+    # Generate random noise
+    noise = torch.rand(B, C, H, W, device=device)
+
+    # Salt noise (white pixels)
+    salt = noise < (noise_prob / 2)
+    img[salt] = 1.0  # Set salt noise to white (1)
+
+    # Pepper noise (black pixels)
+    pepper = noise > (1.0 - noise_prob / 2)
+    img[pepper] = 0.0  # Set pepper noise to black (0)
+
+    return img
+
+
+# Update morph_perturb_image function to include Salt and Pepper noise
+def morph_perturb_image(img, coeff=1.0, noise_prob=0.05):
     B, C, H, W = img.shape
     device = img.device
 
@@ -49,29 +71,69 @@ def morph_perturb_image(img, coeff=1.0):
     # ---- Affine transform ----
     tforms = prepare_transforms(device, B, coeff)
     perturbed = F.grid_sample(img, tforms, padding_mode="zeros", align_corners=True)
+
     # ---- Randomly choose none/erosion/dilation ----
     choice = torch.randint(0, 3, (B,), device=device)
     # ---- Randomly choose inversion ----
     choice2 = torch.randint(0, 2, (B,), device=device) == 1
+
     for i in range(B):
-        if choice[i] == 1:  # erosion            
-            #-F.max_pool2d(-x, 2, stride=1, padding=1)
+        if choice[i] == 1:  # erosion
             xn = perturbed[i].cpu().numpy()
             x_bin = (xn > 0.5).astype(np.uint8)
-            x_skel=skeletonize(x_bin).astype(np.float32)
-            perturbed[i:i+1,0] = torch.tensor(x_skel).to(device)
+            x_skel = skeletonize(x_bin).astype(np.float32)
+            perturbed[i:i + 1, 0] = torch.tensor(x_skel).to(device)
         elif choice[i] == 2:  # dilation
             x_morph = F.max_pool2d(perturbed[i], kernel_size, stride=1, padding=pad)
-            perturbed[i:i+1] = x_morph
+            perturbed[i:i + 1] = x_morph
         if choice2[i]:
-            perturbed[i:i+1] = 1 - perturbed[i:i+1]
+            perturbed[i:i + 1] = 1 - perturbed[i:i + 1]
 
-    # ---- Add noise ----
+    # ---- Add Salt and Pepper Noise ----
+    perturbed = salt_and_pepper(perturbed, noise_prob=noise_prob)
+
+    # ---- Add Gaussian Noise ----
     noise_std = 0.3
     noise = torch.randn_like(perturbed) * noise_std
     perturbed = torch.clamp(perturbed + noise, 0.0, 1.0)
 
     return perturbed
+
+
+# def morph_perturb_image(img, coeff=1.0):
+#     B, C, H, W = img.shape
+#     device = img.device
+#
+#     kernel_size = 3
+#     pad = kernel_size // 2
+#     perturbed = torch.empty_like(img)
+#
+#     # ---- Affine transform ----
+#     tforms = prepare_transforms(device, B, coeff)
+#     perturbed = F.grid_sample(img, tforms, padding_mode="zeros", align_corners=True)
+#     # ---- Randomly choose none/erosion/dilation ----
+#     choice = torch.randint(0, 3, (B,), device=device)
+#     # ---- Randomly choose inversion ----
+#     choice2 = torch.randint(0, 2, (B,), device=device) == 1
+#     for i in range(B):
+#         if choice[i] == 1:  # erosion
+#             #-F.max_pool2d(-x, 2, stride=1, padding=1)
+#             xn = perturbed[i].cpu().numpy()
+#             x_bin = (xn > 0.5).astype(np.uint8)
+#             x_skel=skeletonize(x_bin).astype(np.float32)
+#             perturbed[i:i+1,0] = torch.tensor(x_skel).to(device)
+#         elif choice[i] == 2:  # dilation
+#             x_morph = F.max_pool2d(perturbed[i], kernel_size, stride=1, padding=pad)
+#             perturbed[i:i+1] = x_morph
+#         if choice2[i]:
+#             perturbed[i:i+1] = 1 - perturbed[i:i+1]
+#
+#     # ---- Add noise ----
+#     noise_std = 0.3
+#     noise = torch.randn_like(perturbed) * noise_std
+#     perturbed = torch.clamp(perturbed + noise, 0.0, 1.0)
+#
+#     return perturbed
     
 # ---------------- ARCHITECTURE ----------------
 class Encoder(nn.Module):
