@@ -151,3 +151,48 @@ We've explored several self-supervised and generative learning approaches, each 
    - **Evaluation**: Visual comparison of original, perturbed, and reconstructed images.
 
 ![jepa_img](imgs/Reconstruction.png)
+
+# 💫 System identification experiments
+
+**Paper:** *VJEPA: Variational Joint Embedding Predictive Architectures as Probabilistic World Models*
+
+## What is VJEPA?
+- **VJEPA** extends **JEPA** (Joint Embedding Predictive Architecture) with a **probabilistic, variational objective** to model **predictive distributions over future latent states** rather than deterministic point predictions.
+- VJEPA learns a **latent state space dynamics model** that provides **uncertainty-aware predictions** without reconstructing high-entropy observations like pixels.
+
+## Key Components
+- **Encoder & Predictor:** Encode context observations into latent variables `Z_C`, then learn predictive distribution \( p_\phi(Z_T | Z_C, \xi_T) \). 
+- **Inference Model:** Uses a target encoder (e.g., EMA of parameters) to define an approximate posterior over latents.
+- **Variational Loss:** Combines negative log-likelihood with KL regularization toward a prior, yielding a representation that **maximizes predictive information** while discarding nuisance variability.
+
+## Bayesian JEPA (BJEPA)
+- Factorizes predictive belief into two experts:
+  - a **dynamics expert** (learned world dynamics)
+  - a **prior expert** (task/constraint priors)  
+- Allows constraints (like goals or physics) to be incorporated via **Product of Experts** and supports **zero-shot task transfer**.
+
+## 📦 Toy Experiment: “Noisy TV” Linear System
+### Setup
+- **Environment:** A simple 2-D linear dynamical system where true latent state evolves linearly.
+- Observations are corrupted by **high-variance noise** (like a “noisy TV” static over a signal).
+
+### Competing Models
+- **Generative baselines:** Models that reconstruct observations (e.g., VAE, autoregressive models).
+- **JEPA/VJEPA architectures:** Models that predict **latent states** without pixel reconstruction.
+
+### Results
+- **VJEPA & BJEPA** successfully recover the *true latent signal* by ignoring high-variance nuisance noise.
+- **Generative models** degrade drastically because they must model the noisy observations directly.
+- This shows VJEPA’s representations are **robust to irrelevant noise** and maintain high fidelity in predictive tasks.
+
+![jepa_img](imgs/phase_8.0.gif)
+![jepa_img](imgs/photo_R2.jpg)
+![jepa_img](imgs/photo_phase1.jpg)
+
+
+## 🧩 Bottom Line
+- VJEPA provides a **probabilistic world model** that is:
+  - *latent-focused (no pixel reconstruction)*
+  - *uncertainty-aware*
+  - *robust to nuisance variability*  
+- The “Noisy TV” linear system experiment concretely illustrates how VJEPA can filter out high-variance noise and maintain *predictive structure*, outperforming generative baselines.
